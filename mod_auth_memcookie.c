@@ -155,7 +155,6 @@ static char * extract_cookie(request_rec *r, const char *szCookie_name)
 static void fix_headers_in(request_rec *r, const char *szPassword)
 {
 
-    strAuth_memCookie_config_rec *conf = NULL;
     const char *szUser = NULL;
 
     /* Set an Authorization header in the input request table for php and
@@ -337,9 +336,7 @@ static int Auth_memCookie_check_cookie(request_rec *r)
     strAuth_memCookie_config_rec *conf = NULL;
     char *szCookieValue = NULL;
     apr_table_t *pAuthSession = NULL;
-    apr_status_t tRetStatus;
     char *szRemoteIP = NULL;
-    const char *command = NULL;
 
     ap_log_rerror(APLOG_MARK,APLOG_DEBUG|APLOG_NOERRNO, 0,r,ERRTAG  "ap_hook_check_user_id in");
 
@@ -353,7 +350,12 @@ static int Auth_memCookie_check_cookie(request_rec *r)
     else if (conf->nAuth_memCookie_MatchIP_Mode == 1 && apr_table_get(r->headers_in, "X-Forwarded-For") != NULL)
 	   szRemoteIP = apr_pstrdup(r->pool, apr_table_get(r->headers_in, "X-Forwarded-For"));
     else
-	   szRemoteIP = apr_pstrdup(r->pool, r->connection->client_ip);
+#if AP_SERVER_MAJORVERSION_NUMBER>2 || \
+    (AP_SERVER_MAJORVERSION_NUMBER == 2 && AP_SERVER_MINORVERSION_NUMBER>=4)
+       szRemoteIP = apr_pstrdup(r->pool, r->connection->client_ip);
+#else
+	   szRemoteIP = apr_pstrdup(r->pool, r->connection->remote_ip);
+#endif
 
     if (!conf->nAuth_memCookie_Authoritative)
 	   return DECLINED;
