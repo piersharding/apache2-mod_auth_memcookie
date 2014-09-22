@@ -15,7 +15,7 @@ Takes a session cookie, looks this up in Memcache.  Sets REMOTE_USER to UserName
         Auth_memCookie_CookieName AuthMemCookie
         Auth_memCookie_Memcached_AddrPort 127.0.0.1:11211
         Auth_memCookie_Add_Remote_User_Header on
-        Auth_memCookie_SessionHeaders on
+        Auth_memCookie_SessionHeaders "ATTR_user, ATTR_Bad_Header"
         Auth_memCookie_SetSessionHTTPHeader on
 
         # to redirect unauthorized user to the login page

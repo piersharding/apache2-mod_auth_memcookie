@@ -397,8 +397,10 @@ static int Auth_memCookie_check_cookie(request_rec *r)
     if (conf->szAuth_memCookie_SessionHeaders) {
     	char *headers = apr_pstrdup(r->pool, conf->szAuth_memCookie_SessionHeaders);
     	char *key, *keypos = 0;
-    	for(key = strtok_r(headers, ", ", &keypos); key; key = strtok_r(NULL, ", ", &keypos))
+    	for(key = strtok_r(headers, ", ", &keypos); key; key = strtok_r(NULL, ", ", &keypos)) {
+            ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, ERRTAG "Unsetting header: %s", key);
     	    apr_table_unset(r->headers_in, key);
+        }
     }
 
     /* still no session? goodbye */
