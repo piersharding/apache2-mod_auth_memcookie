@@ -79,6 +79,8 @@ module AP_MODULE_DECLARE_DATA mod_auth_memcookie_module;
 /* config structure */
 typedef struct {
     char *	szAuth_memCookie_memCached_addr;
+    apr_time_t  tAuth_memCookie_MemcacheObjectExpiry;
+    int     nAuth_memCookie_MemcacheObjectExpiryReset;
     int 	nAuth_memCookie_SetSessionHTTPHeader;
     int 	nAuth_memCookie_SessionTableSize;
     char *	szAuth_memCookie_CookieName;
@@ -196,6 +198,7 @@ static void fix_headers_in(request_rec *r, const char *szPassword)
 static apr_table_t *Auth_memCookie_get_session(request_rec *r, strAuth_memCookie_config_rec *conf, char *szCookieValue)
 {
     char *szMemcached_addr = conf->szAuth_memCookie_memCached_addr;
+    apr_time_t tExpireTime = conf->tAuth_memCookie_MemcacheObjectExpiry;
 
     memcached_st *mc_session = NULL;
     memcached_server_st *servers = NULL;
@@ -277,6 +280,14 @@ static apr_table_t *Auth_memCookie_get_session(request_rec *r, strAuth_memCookie
     				 apr_table_get(pMySession,"RemoteIP"));
     }
 
+    /* reset expire time */
+    if (conf->nAuth_memCookie_MemcacheObjectExpiryReset && pMySession) {
+        if ((mc_err = memcached_set(mc_session, szCookieValue, nGetKeyLen, szValue, nGetLen, tExpireTime, 0))) {
+            ap_log_rerror(APLOG_MARK, APLOG_ERR|APLOG_NOERRNO, 0, r,ERRTAG  "Expire time with mc_set (key:%s) failed with errcode=%d",szCookieValue,mc_err);
+            pMySession = NULL;
+        }
+    }
+
     /* free returned value */
     if (szValue)
 	   free(szValue);
@@ -339,6 +350,8 @@ static int Auth_memCookie_check_cookie(request_rec *r)
     char *szRemoteIP = NULL;
 
     ap_log_rerror(APLOG_MARK,APLOG_DEBUG|APLOG_NOERRNO, 0,r,ERRTAG  "ap_hook_check_user_id in");
+
+    ap_log_rerror(APLOG_MARK,APLOG_DEBUG|APLOG_NOERRNO, 0,r,ERRTAG  "Incomming URI is: %s", r->unparsed_uri);
 
     /* get apache config */
     conf = ap_get_module_config(r->per_dir_config, &mod_auth_memcookie_module);
@@ -416,6 +429,27 @@ static int Auth_memCookie_check_cookie(request_rec *r)
        }
     }
 
+
+
+   /* check if this is a logout request */
+    // if (szCookieValue && command && !strcasecmp(command, "logout")) {
+    //     char *set_cookie;
+    //     ap_log_rerror(APLOG_MARK, APLOG_INFO|APLOG_NOERRNO, 0, r, ERRTAG "deleting session %s", szCookieValue);
+
+    //     /* add set-cookie directive to headers */
+    //     set_cookie = apr_psprintf(r->pool, "%s=; expires=Thu, 01-Jan-1970 00:00:01 GMT; path=/", conf->szAuth_memCookie_CookieName);
+    //     if (conf->szAuth_memCookie_CookieDomain && *conf->szAuth_memCookie_CookieDomain)
+    //         set_cookie = apr_psprintf(r->pool, "%s; domain=%s", set_cookie, conf->szAuth_memCookie_CookieDomain);
+    //     apr_table_add(r->headers_out, "Set-Cookie", set_cookie);
+    //     apr_table_add(r->err_headers_out, "Set-Cookie", set_cookie);
+
+    //     /* delete session from memcache */
+    //     Auth_memCookie_delete_session(r, conf, szCookieValue);
+    //     return HTTP_UNAUTHORIZED;
+    // }
+
+
+
     /* set env var X_ to the information session value */
     apr_table_do(Auth_memCookie_DoSetEnv, r, pAuthSession, NULL);
 
@@ -447,6 +481,32 @@ static int Auth_memCookie_check_cookie(request_rec *r)
     return OK;
 }
 
+
+/* delete session with szCookieValue key from the memcached server */
+static int Auth_memCookie_delete_session(request_rec *r, strAuth_memCookie_config_rec *conf, char *szCookieValue)
+{
+    char *szMemcached_addr=conf->szAuth_memCookie_memCached_addr;
+    memcached_st *mc_session=NULL;
+    memcached_server_st *servers = NULL;
+    memcached_return mc_err=0;
+    size_t nGetKeyLen=strlen(szCookieValue);
+
+    if ((mc_session = memcached_create(NULL)) == 0) {
+    ap_log_rerror(APLOG_MARK, APLOG_ERR|APLOG_NOERRNO, 0, r, ERRTAG "memcache lib init failed");
+    return DECLINED;
+    }
+    servers = memcached_servers_parse(szMemcached_addr);
+    memcached_server_push(mc_session, servers);
+    if ((mc_err = memcached_delete(mc_session, szCookieValue, nGetKeyLen, (time_t)0)) != 0) {
+    ap_log_rerror(APLOG_MARK, APLOG_ERR|APLOG_NOERRNO, 0, r,ERRTAG  "Auth_memCookie_delete_session memcached_delete (key:%s) failed with errcode=%d",szCookieValue,mc_err);
+    memcached_free(mc_session);
+    return DECLINED;
+    }
+    memcached_free(mc_session);
+    return OK;
+}
+
+
 static int memcookie_sink_filter(ap_filter_t *f, apr_bucket_brigade *in)
 {
     return APR_SUCCESS;
@@ -470,6 +530,8 @@ static void *create_Auth_memCookie_dir_config(apr_pool_t *p, char *d)
 
     conf->szAuth_memCookie_memCached_addr = apr_pstrdup(p,"127.0.0.1:11211");
     conf->szAuth_memCookie_CookieName = apr_pstrdup(p,"AuthMemCookie");
+    conf->tAuth_memCookie_MemcacheObjectExpiry = 3600; /* memcache object expire time, 1H by default */
+    conf->nAuth_memCookie_MemcacheObjectExpiryReset = 1;  /* fortress is secure by default, reset object expire time in memcache by default */
     conf->nAuth_memCookie_MatchIP_Mode = 0;  /* method used in matchip, use (0) remote ip by default, if set to 1 for use ip from x_forwarded_for http header and 2 for use Via http header */
     conf->nAuth_memCookie_Authoritative = 0;  /* not by default */
     conf->nAuth_memCookie_authbasicfix = 0;  /* fix header for php auth by default */
@@ -495,15 +557,22 @@ static const char *cmd_MatchIP_Mode(cmd_parms *cmd, void *InDirConf, const char 
     return NULL;
 }
 
+
 /* apache config fonction of the module */
 static const command_rec Auth_memCookie_cmds[] =
 {
     AP_INIT_TAKE1("Auth_memCookie_Memcached_AddrPort", ap_set_string_slot,
      (void *)APR_OFFSETOF(strAuth_memCookie_config_rec, szAuth_memCookie_memCached_addr),
      OR_AUTHCFG, "ip or host adressei(s) and port (':' separated) of memcache(s) daemon to be used, coma separated"),
+    AP_INIT_TAKE1("Auth_memCookie_Memcached_SessionObject_ExpireTime", ap_set_int_slot,
+     (void *)APR_OFFSETOF(strAuth_memCookie_config_rec, tAuth_memCookie_MemcacheObjectExpiry),
+     OR_AUTHCFG, "Session object in memcached expiry time, in secondes."),
     AP_INIT_TAKE1("Auth_memCookie_SessionTableSize", ap_set_int_slot,
      (void *)APR_OFFSETOF(strAuth_memCookie_config_rec, nAuth_memCookie_SessionTableSize),
      OR_AUTHCFG, "Max number of element in session information table. 10 by default"),
+    AP_INIT_FLAG ("Auth_memCookie_Memcached_SessionObject_ExpiryReset", ap_set_flag_slot,
+     (void *)APR_OFFSETOF(strAuth_memCookie_config_rec, nAuth_memCookie_MemcacheObjectExpiryReset),
+     OR_AUTHCFG, "Set to 'no' to not reset object expiry time in memcache... yes by default"),
     AP_INIT_FLAG ("Auth_memCookie_SetSessionHTTPHeader", ap_set_flag_slot,
      (void *)APR_OFFSETOF(strAuth_memCookie_config_rec, nAuth_memCookie_SetSessionHTTPHeader),
      OR_AUTHCFG, "Set to 'yes' to set session information to http header of the authenticated users, no by default"),

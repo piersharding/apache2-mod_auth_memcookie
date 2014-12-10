@@ -44,7 +44,8 @@ Takes a session cookie, looks this up in Memcache.  Sets REMOTE_USER to UserName
 * Auth_memCookie_SilmulateAuthBasic: Set to 'no' to fix http header and auth_type for simulating auth basic for scripting languages like php auth framework work, set to 'no' by default
 * Auth_memCookie_SessionHeaders: Comma seperated list of headers that define a session - these get unset
 * Auth_memCookie_Add_Remote_User_Header: Set to 'yes' to pass username in te header X-Remote-User, set to 'no' by default
-
+* Auth_memCookie_Memcached_SessionObject_ExpireTime: Session object in memcached expiry time, in seconds.
+* Auth_memCookie_Memcached_SessionObject_ExpiryReset: Set to 'no' to not reset object expiry time in memcache... yes by default
 
 ## Build
 
